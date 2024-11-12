@@ -157,6 +157,19 @@ functions = [
             }
         },
         'required': ['name', 'age', 'date_of_birth', 'gender']  
+    },
+    {
+        'name': 'get_counseling_record',
+        'description': '사용자의 상담 내용을 SQL 데이터베이스에서 조회하는 함수',
+        'parameters': {
+            'type': 'object',
+            'properties':{
+                'name': {'type': 'string', 'description': '사용자의 이름'},
+                'session_date': {'type': 'string', 'format': 'date', 'description': '사용자의 상담일 (YYYY-MM-DD 형식'},
+                
+            }
+        },
+        'required': ['name', 'session_date']     
     }
 ]
 
@@ -262,6 +275,10 @@ def insert_counseling_record(name, session_content, counselor_name=None):
         [f"사용자: {entry['content']}" if entry["role"] == "user" else f"상담사: {entry['content']}"
          for entry in session_content]
     )
+
+    # 상담 내용 요약
+    session_summary = generate_summary(content_only)
+
     conn = pymysql.connect(
         host='127.0.0.1',
         user='root',
@@ -275,15 +292,43 @@ def insert_counseling_record(name, session_content, counselor_name=None):
     
     # SQL INSERT 쿼리 작성
     sql = """
-        INSERT INTO counseling_records (name, session_date, session_content, counselor_name)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO counseling_records (name, session_date, session_summary, session_content, counselor_name)
+        VALUES (%s, %s, %s, %s, %s)
     """
-    cursor.execute(sql, (name, session_date, content_only, counselor_name))
+    cursor.execute(sql, (name, session_date, session_summary, content_only, counselor_name))
     
     conn.commit()
     conn.close()
     
     return "상담 기록이 성공적으로 저장되었습니다."
+
+# 상담 내용 요약 생성 함수
+def generate_summary(content):
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "요약 도우미입니다. 상담 내용을 간략하게 요약해 주세요."},
+            {"role": "user", "content": content}
+        ],
+        max_tokens=50
+    )
+    summary = response.choices[0].message.content
+    return summary
+
+def get_counseling_record(name):
+    conn = pymysql.connect(
+        host='127.0.0.1',
+        user='root',
+        password='1541',
+        database='chat_care'
+    )
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    cursor.execute("SELECT session_summary FROM counseling_records WHERE name = (%s) ORDER BY record_id DESC", (name, ))
+    user_data = cursor.fetchone()
+    conn.close()
+    print(user_data['session_summary'])
+   
+    return user_data['session_summary']
 #################################################################
 
 def check(content, message, total_content):
@@ -315,9 +360,9 @@ def check(content, message, total_content):
     elif function_name == 'update_user_info':
         function_response = update_user_info(**params)
     elif function_name == 'insert_counseling_record':
-
-        print(message)
         function_response = insert_counseling_record(name, total_content, None)
+    elif function_name == 'get_counseling_record':
+        function_response = get_counseling_record(name)
     else:
         function_response = json.dumps({"error": "Invalid function call"})
 
